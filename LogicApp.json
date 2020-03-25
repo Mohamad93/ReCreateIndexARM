@@ -1,0 +1,179 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "IndexBuilder",
+      "minLength": 1,
+      "maxLength": 80,
+      "metadata": {
+        "description": "Name of the Logic App."
+      }
+    },
+    "logicAppLocation": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location of the Logic App."
+      }
+    },
+    "SearchServiceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Search Service"
+      }
+    },
+    "Index": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Index"
+      }
+    },
+    "Indexer": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Indexer"
+      }
+    }
+  },
+  "variables": {
+    "SearchServiceId": "[resourceId('Microsoft.Search/searchServices', parameters('SearchServiceName'))]"
+  },
+  "resources": [
+    {
+      "name": "[parameters('logicAppName')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[parameters('logicAppLocation')]",
+      "tags": {
+        "displayName": "LogicApp"
+      },
+      "apiVersion": "2016-06-01",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "triggers": {
+            "Recurrence": {
+              "recurrence": {
+                "frequency": "Day",
+                "interval": 1,
+                "schedule": {
+                  "hours": [
+                    "23"
+                  ],
+                  "minutes": [
+                    0
+                  ]
+                },
+                "timeZone": "W. Europe Standard Time"
+              },
+              "type": "Recurrence"
+            }
+          },
+          "actions": {
+            "HTTP_Get_Index": {
+              "runAfter": {},
+              "type": "Http",
+              "inputs": {
+                "authentication": {
+                  "type": "ManagedServiceIdentity"
+                },
+                "headers": {
+                  "Content-Type": "application/json",
+                  "api-key": "[listAdminKeys(variables('SearchServiceId'), '2015-08-19').PrimaryKey]"
+                },
+                "method": "GET",
+                "uri": "[concat('https://', parameters('SearchServiceName'), '.search.windows.net/indexes/', parameters('Index'), '?api-version=2019-05-06')]"
+              }
+            },
+            "HTTP_Delete_Index": {
+              "runAfter": {
+                "HTTP_Get_Index": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "authentication": {
+                  "type": "ManagedServiceIdentity"
+                },
+                "headers": {
+                  "Content-Type": "application/json",
+                  "api-key": "[listAdminKeys(variables('SearchServiceId'), '2015-08-19').PrimaryKey]"
+                },
+                "method": "DELETE",
+                "uri": "[concat('https://', parameters('SearchServiceName'), '.search.windows.net/indexes/', parameters('Index'), '?api-version=2019-05-06')]"
+              }
+            },
+            "HTTP_Create_Index": {
+              "runAfter": {
+                "HTTP_Delete_Index": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "authentication": {
+                  "type": "ManagedServiceIdentity"
+                },
+                "body": "@body('HTTP_Get_Index')",
+                "headers": {
+                  "Content-Type": "application/json",
+                  "api-key": "[listAdminKeys(variables('SearchServiceId'), '2015-08-19').PrimaryKey]"
+                },
+                "method": "POST",
+                "uri": "[concat('https://', parameters('SearchServiceName'), '.search.windows.net/indexes?api-version=2019-05-06')]"
+              }
+            },
+            "HTTP_Reset_Indexer": {
+              "runAfter": {
+                "HTTP_Create_Index": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "authentication": {
+                  "type": "ManagedServiceIdentity"
+                },
+                "headers": {
+                  "Content-Type": "application/json",
+                  "api-key": "[listAdminKeys(variables('SearchServiceId'), '2015-08-19').PrimaryKey]"
+                },
+                "method": "POST",
+                "uri": "[concat('https://', parameters('SearchServiceName'), '.search.windows.net/indexers/', parameters('Indexer'), '/reset?api-version=2019-05-06')]"
+              }
+            },
+            "HTTP_Run_Indexer": {
+              "runAfter": {
+                "HTTP_Reset_Indexer": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "authentication": {
+                  "type": "ManagedServiceIdentity"
+                },
+                "headers": {
+                  "Content-Type": "application/json",
+                  "api-key": "[listAdminKeys(variables('SearchServiceId'), '2015-08-19').PrimaryKey]"
+                },
+                "method": "POST",
+                "uri": "[concat('https://', parameters('SearchServiceName'), '.search.windows.net/indexers/', parameters('Indexer'), '/run?api-version=2019-05-06')]"
+              }
+            }
+          },
+          "outputs": {},
+          "parameters": {}
+        },
+        "parameters": {}
+      }
+    }
+  ],
+  "outputs": {}
+}
